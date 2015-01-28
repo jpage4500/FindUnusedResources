@@ -389,7 +389,7 @@ public class FindUnusedResources {
             if (isJava) {
                 String convertedValue = value;
                 // special case: in java files, dot is replaced with underscore
-                // eg: BeepNGo.ClearDialog is referenced as BeepNGo_ClearDialog
+                // eg: Parent.Style is referenced as Parent_Style
                 if (convertedValue.indexOf('.') > 0) {
                     convertedValue = value.replace('.', '_');
                 }
