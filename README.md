@@ -18,10 +18,11 @@ Removes the following resources located in any project/res/drawable* directory:
 
 	java FindUnusedResources PATH
 	- where PATH is the path to your Android project (should have AndroidManifest.xml file in it)
+	- optionally, add "noprompt" after PATH to remove unused resources w/out prompting
 
 ## WARNING
 
-Before you run this program, make sure to start with a clean workspace (ie: no outstanding changes). That way, if it removes too many resource files or resource keys you can always revert easily. Do NOT run this program without first checking-in your code!!
+By default, this program will by allow you to view unused resources before removing anything. However, to be same please sure to start with a clean workspace (ie: no outstanding changes) under source control or have a copy of the project backed up! That way, if it removes something you needed, you can always revert easily.
 
 ## DETAILS
 
@@ -70,8 +71,10 @@ There's a few different ways a resource can be referenced in Android.. here's wh
 .xml
 
 	@<type>/<value> (where <type> could be "string", "dimen", "color", etc)
-	parent=<value>
-	@<value>.
+	@id/<value>
+	- additionally, the following are looked at for <style>'s:
+	   parent=<value>
+	   @<value>.
 
 ### STEP 3 - remove or delete resources with no references
 
@@ -84,6 +87,8 @@ On the second pass, the unreferenced image will be removed.. and so on.
 ### OUTPUT
 
 The app will print some statistics while it runs. See the example output below:
+
+(UPDATE: output has changed slightly since I'm now prompting the user after each PASS) 
 
     Indexing resources...
     got 368 string resources

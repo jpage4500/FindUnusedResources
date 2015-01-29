@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -19,6 +20,12 @@ import java.util.concurrent.atomic.AtomicInteger;
  */
 public class FindUnusedResources {
 
+    private static final int ACTION_EXIT = 4;
+    private static final int ACTION_PRINT_ALL = 3;
+    private static final int ACTION_PRINT_UNUSED = 1;
+    private static final int ACTION_DELETE = 2;
+
+    // each map below contains ALL indexed resources for that particular type (string/color/etc) and a reference count
     private static Map<String, AtomicInteger> mStringMap = new TreeMap<String, AtomicInteger>();
     private static Map<String, AtomicInteger> mDimenMap = new TreeMap<String, AtomicInteger>();
     private static Map<String, AtomicInteger> mColorMap = new TreeMap<String, AtomicInteger>();
@@ -27,11 +34,12 @@ public class FindUnusedResources {
     private static Map<String, AtomicInteger> mLayoutMap = new TreeMap<String, AtomicInteger>();
     private static Map<String, AtomicInteger> mStylesMap = new TreeMap<String, AtomicInteger>();
 
+    // what resources we're looking for..
     private static String USE_STRING = "string";
     private static String USE_DIMEN = "dimen";
     private static String USE_COLOR = "color";
-    private static String USE_ARR = "string-array"; // name used for defining arrays
-    private static String USE_ARR2 = "array"; // name used for referencing arrays
+    private static String USE_ARR = "string-array";
+    private static String USE_ARR2 = "array";
     private static String USE_DRAWABLE = "drawable";
     private static String USE_LAYOUT = "layout";
     private static String USE_STYLES = "style";
@@ -48,11 +56,19 @@ public class FindUnusedResources {
             System.out.println("usage: FindUnusedResources <path>");
             System.out.println("- where <path> is the path to an Android project (where AndroidManifest.xml exists)");
             System.out.println("");
+            System.out.println("- optionally, add \"noprompt\" after <path> to remove unused w/out prompting");
             System.out.println("eg: java FindUnusedResources ~/working/AndroidProject");
+            System.out.println("eg: java FindUnusedResources ~/working/AndroidProject noprompt");
             System.exit(0);
         }
 
         String root = args[0];
+
+        boolean promptUser = true;
+        // check for "noprompt"
+        if (args.length >= ACTION_DELETE && args[1].equalsIgnoreCase("noprompt")) {
+            promptUser = false;
+        }
 
         File mainFile = new File(root + "/AndroidManifest.xml");
         if (mainFile.exists() == false) {
@@ -66,10 +82,8 @@ public class FindUnusedResources {
 
         // index contents of all .xml files in values*/ directory
         indexValues(resDir, false);
-
         // index all filenames in every /res/drawable*/ directory
         indexDrawables(resDir, false);
-
         // index all filenames in every /res/layout*/ directory
         indexLayout(resDir, false);
 
@@ -86,49 +100,123 @@ public class FindUnusedResources {
         // - the first pass will delete the layout and the second pass will delete the drawable
         int totalRemoved = 0;
         for (int i = 1; true; i++) {
-            int numRemoved = findAndRemoveResources(root, i);
+            // search for unused resources..
+            int unused = findUnusedResources(root, i);
+            if (unused == 0) {
+                // nothing to do!
+                break;
+            }
+
+            int numRemoved = 0;
+
+            // prompt next action..
+            while (true) {
+                int command;
+                if (promptUser) {
+                    command = promptNext();
+                } else {
+                    command = ACTION_DELETE;
+                }
+
+                if (command == ACTION_PRINT_UNUSED) {
+                    printResources(true, false);
+                } else if (command == ACTION_DELETE) {
+                    numRemoved = deleteUnusedResources(root, i);
+                    // break out of loop and continue search..
+                    break;
+                }
+                if (command == ACTION_PRINT_ALL) {
+                    printResources(false, false);
+                } else if (command == ACTION_EXIT) {
+                    // STOP & exit!
+                    return;
+                }
+            }
+
             if (numRemoved == 0) {
+                // all DONE!
                 break;
             }
 
             totalRemoved += numRemoved;
         }
-        System.out.println("DONE! Removed " + totalRemoved + " TOTAL resources");
 
-        Iterator<String> keyItor = mTotalRemovedMap.keySet().iterator();
-        while (keyItor.hasNext()) {
-            String key = keyItor.next();
-            Integer value = mTotalRemovedMap.get(key);
-            System.out.println("-> " + value + " " + key + " resources");
+        if (totalRemoved > 0) {
+            System.out.println("DONE! Removed " + totalRemoved + " TOTAL resources");
+
+            Iterator<String> keyItor = mTotalRemovedMap.keySet().iterator();
+            while (keyItor.hasNext()) {
+                String key = keyItor.next();
+                Integer value = mTotalRemovedMap.get(key);
+                System.out.println("-> " + value + " " + key + " resources");
+            }
         }
     }
 
-    private static int findAndRemoveResources(String root, int i) {
+    private static int promptNext() {
+        //  prompt the user to enter their name
+        System.out.println("");
+        System.out.println("Select Option:");
+        System.out.println(ACTION_PRINT_UNUSED + ") show UNUSED resources");
+        System.out.println(ACTION_DELETE + ") DELETE unused resources");
+        System.out.println(ACTION_PRINT_ALL + ") show ALL indexed resources & usage counts");
+        System.out.println(ACTION_EXIT + ") exit");
 
+        BufferedReader br = null;
+        String choice = null;
+        try {
+            //  open up standard input
+            br = new BufferedReader(new InputStreamReader(System.in));
+            choice = br.readLine();
+
+            return Integer.parseInt(choice);
+        } catch (IOException ioe) {
+            System.out.println("> IOException: " + choice);
+            ioe.printStackTrace();
+        } catch (NumberFormatException nfe) {
+            System.out.println("> invalid choice: " + choice);
+        }
+        return 0;
+    }
+
+    private static int findUnusedResources(String root, int pass) {
         File resDir = new File(root + "/res");
 
-        // look at all files to determine if resources are still in use
-        System.out.print("\nPASS " + i);
+        System.out.print("\nPASS " + pass);
+
+        // search through AndroidManifext.xml
         searchFileForUse(new File(root + "/AndroidManifest.xml"));
+
+        // search through all JAVA files in /src directory
         searchDirForUse(new File(root + "/src"));
+
+        // search through all XML files in /res directory
         searchDirForUse(resDir);
+
+        // done searching
         System.out.println();
 
-        // delete files that aren't in use
+        // print out summary for this pass
+        return printResources(true, true);
+    }
 
+    private static int deleteUnusedResources(String root, int i) {
+        File resDir = new File(root + "/res");
+
+        // delete files that aren't in use
         indexValues(resDir, true);
         indexDrawables(resDir, true);
         indexLayout(resDir, true);
 
         // pring and clear deleted resources from maps for next time through
         int totalRemoved = 0;
-        totalRemoved += printUnused(mStringMap, USE_STRING);
-        totalRemoved += printUnused(mDimenMap, USE_DIMEN);
-        totalRemoved += printUnused(mColorMap, USE_COLOR);
-        totalRemoved += printUnused(mArrayMap, USE_ARR);
-        totalRemoved += printUnused(mStylesMap, USE_STYLES);
-        totalRemoved += printUnused(mLayoutMap, USE_LAYOUT);
-        totalRemoved += printUnused(mDrawableMap, USE_DRAWABLE);
+        totalRemoved += resetCounters(mStringMap, USE_STRING);
+        totalRemoved += resetCounters(mDimenMap, USE_DIMEN);
+        totalRemoved += resetCounters(mColorMap, USE_COLOR);
+        totalRemoved += resetCounters(mArrayMap, USE_ARR);
+        totalRemoved += resetCounters(mStylesMap, USE_STYLES);
+        totalRemoved += resetCounters(mLayoutMap, USE_LAYOUT);
+        totalRemoved += resetCounters(mDrawableMap, USE_DRAWABLE);
 
         return totalRemoved;
     }
@@ -161,7 +249,7 @@ public class FindUnusedResources {
             else if (!file.isDirectory() && (filename.endsWith(".png") || filename.endsWith(".xml") && !isExcludedFile(filename))) {
                 filename = filename.substring(0, filename.length() - 4);
                 if (filename.endsWith(".9")) {
-                    filename = filename.substring(0, filename.length() - 2);
+                    filename = filename.substring(0, filename.length() - ACTION_DELETE);
                 }
 
                 if (isDeleteMode) {
@@ -232,17 +320,68 @@ public class FindUnusedResources {
         }
     }
 
-    private static int printUnused(Map<String, AtomicInteger> map, String text) {
+    private static int printResources(boolean showUnusedOnly, boolean showSummaryOnly) {
+        int total = 0;
+        total += printResources(mStringMap, USE_STRING, showUnusedOnly, showSummaryOnly);
+        total += printResources(mDimenMap, USE_DIMEN, showUnusedOnly, showSummaryOnly);
+        total += printResources(mColorMap, USE_COLOR, showUnusedOnly, showSummaryOnly);
+        total += printResources(mArrayMap, USE_ARR, showUnusedOnly, showSummaryOnly);
+        total += printResources(mStylesMap, USE_STYLES, showUnusedOnly, showSummaryOnly);
+        total += printResources(mLayoutMap, USE_LAYOUT, showUnusedOnly, showSummaryOnly);
+        total += printResources(mDrawableMap, USE_DRAWABLE, showUnusedOnly, showSummaryOnly);
+        return total;
+    }
+
+    private static int printResources(Map<String, AtomicInteger> map, String text, boolean showUnusedOnly, boolean showSummaryOnly) {
         int count = 0;
         StringBuffer unused = new StringBuffer();
         Iterator<String> it = map.keySet().iterator();
         while (it.hasNext()) {
             String key = it.next();
             AtomicInteger value = map.get(key);
-            if (value.get() == 0) {
-                // UNUSED
+            if (value == null) {
+                continue;
+            }
+            if (showUnusedOnly && value.get() == 0) {
+                // UNUSED RESOURCE
                 count++;
-                unused.append(key).append('\n');
+                if (!showSummaryOnly) {
+                    unused.append(key).append('\n');
+                }
+            } else if (!showUnusedOnly) {
+                count++;
+                if (!showSummaryOnly) {
+                    unused.append(key + ", " + value.get()).append('\n');
+                }
+            }
+        }
+
+        if (count > 0) {
+            if (showUnusedOnly) {
+                System.out.println("found " + count + " unused " + text + " resources");
+            } else {
+                System.out.println("showing " + count + " " + text + " resources:");
+                System.out.println("<resource>, <# of references>");
+                System.out.println("-----------------------------");
+            }
+
+            if (!showSummaryOnly) {
+                System.out.println(unused.toString());
+            }
+        }
+
+        return count;
+    }
+
+    private static int resetCounters(Map<String, AtomicInteger> map, String text) {
+        int count = 0;
+        Iterator<String> it = map.keySet().iterator();
+        while (it.hasNext()) {
+            String key = it.next();
+            AtomicInteger value = map.get(key);
+            if (value.get() == 0) {
+                // UNUSED RESOURCE
+                count++;
                 // delete this key
                 it.remove();
             } else {
@@ -251,16 +390,7 @@ public class FindUnusedResources {
             }
         }
         if (count > 0) {
-            System.out.println("Removed " + count + " " + text + " resources");
-            System.out.println("UNUSED: " + text + "\n" + unused.toString());
-
-            // track # of items removed for each <text>
-            Integer prevTotal = mTotalRemovedMap.get(text);
-            int newTotal = count;
-            if (prevTotal != null) {
-                newTotal += prevTotal.intValue();
-            }
-            mTotalRemovedMap.put(text, Integer.valueOf(newTotal));
+            System.out.println("REMOVED " + count + " " + text + " resources");
         }
 
         return count;
@@ -337,7 +467,6 @@ public class FindUnusedResources {
             if (p2 > 0) {
                 value = value.substring(0, p2);
                 AtomicInteger count = map.get(value);
-                //System.out.println("checkLine: " + value + ", count: " + count);
                 return (count != null && count.get() == 0);
             }
         }
@@ -352,21 +481,40 @@ public class FindUnusedResources {
             while (true) {
                 String line = br.readLine();
                 if (line == null) {
+                    // done reading file
                     break;
                 }
 
                 // ignore commented out lines
-                //                if (isJava && line.trim().startsWith("//")) {
-                //                    break;
-                //                }
+                if (isJava && line.trim().startsWith("//")) {
+                    continue;
+                }
 
-                searchLineForUse(isJava, line, mStringMap, USE_STRING);
-                searchLineForUse(isJava, line, mDimenMap, USE_DIMEN);
-                searchLineForUse(isJava, line, mColorMap, USE_COLOR);
-                searchLineForUse(isJava, line, mArrayMap, USE_ARR2);
-                searchLineForUse(isJava, line, mDrawableMap, USE_DRAWABLE);
-                searchLineForUse(isJava, line, mStylesMap, USE_STYLES);
-                searchLineForUse(isJava, line, mLayoutMap, USE_LAYOUT);
+                // search line for a reference to one of the indexed resources
+                // NOTE: I'm expecting at most a line can only contain a reference to a single resource type (string/color/etc)
+                // > Once one is found - we can save time by skiping searching for others on the same line
+                // Multiple references for the same time are checked:
+                // ex: int resId = (isSomething ? R.string.one : R.string.two);
+                boolean isMatch = false;
+                isMatch = searchLineForUse(isJava, line, mStringMap, USE_STRING);
+                if (!isMatch) {
+                    searchLineForUse(isJava, line, mDimenMap, USE_DIMEN);
+                }
+                if (!isMatch) {
+                    isMatch = searchLineForUse(isJava, line, mColorMap, USE_COLOR);
+                }
+                if (!isMatch) {
+                    isMatch = searchLineForUse(isJava, line, mArrayMap, USE_ARR2);
+                }
+                if (!isMatch) {
+                    isMatch = searchLineForUse(isJava, line, mDrawableMap, USE_DRAWABLE);
+                }
+                if (!isMatch) {
+                    isMatch = searchLineForUse(isJava, line, mStylesMap, USE_STYLES);
+                }
+                if (!isMatch) {
+                    isMatch = searchLineForUse(isJava, line, mLayoutMap, USE_LAYOUT);
+                }
             }
         } catch (Exception e) {
             System.out.println("searchFileForUse: Error reading file: " + file + ", " + e.getMessage());
@@ -381,10 +529,13 @@ public class FindUnusedResources {
         }
     }
 
-    private static boolean searchLineForUse(boolean isJava, String line, Map<String, AtomicInteger> map, String key) {
-        String searchFor;
-        String searchFor2 = null; // special case; style element can have a parent=value
-        String searchFor3 = null; // special case; style element can have a parent.name
+    private static boolean searchLineForUse(boolean isJava, String line, Map<String, AtomicInteger> map, String type) {
+        String searchFor; // primary use case (ie: R.string.value)
+        String searchFor2 = null; // secondary use case (ie: R.id.value)
+
+        boolean isFound = false;
+
+        // check each indexed value in map
         for (String value : map.keySet()) {
             if (isJava) {
                 String convertedValue = value;
@@ -393,67 +544,78 @@ public class FindUnusedResources {
                 if (convertedValue.indexOf('.') > 0) {
                     convertedValue = value.replace('.', '_');
                 }
-                searchFor = "R." + key + "." + convertedValue;
-
-                // special case: check reference to R.id.value
-                searchFor2 = "R.id." + convertedValue;
+                searchFor = "R." + type + "." + convertedValue; // R.string.value
+                searchFor2 = "R.id." + convertedValue; // R.id.value
             } else {
-                searchFor = "@" + key + "/" + value; // @string/value
-                if (key.equals(USE_STYLES)) {
-                    searchFor2 = "parent=\"" + value + "\"";
-                    searchFor3 = "\"" + value + ".";
+                // XML file
+                searchFor = "@" + type + "/" + value; // @string/value
+                searchFor2 = "@id/" + value; //  @id/value
+            }
+
+            isFound = searchLineForUseWithKey(line, map, searchFor);
+            if (!isFound && searchFor2 != null) {
+                isFound = searchLineForUseWithKey(line, map, searchFor2);
+            }
+
+            if (!isFound && !isJava && map == mStylesMap) {
+                // special case: styles can reference a parent 2 ways in XML file:
+                // 1) parent=
+                // <style name="SquareButtonStyle">
+                // <style name="GreenSquareButtonStyle" parent="@style/SquareButtonStyle">
+                if (line.indexOf("parent=\"@" + type + "/" + value + "\"") >= 0) {
+                    isFound = true;
+                }
+                // 2) parent.child
+                // <style name="DialogButton">
+                // <style name="DialogButton.Left">
+                if (!isFound && line.indexOf("\"" + value + ".") >= 0) {
+                    isFound = true;
                 }
             }
 
-            int stPos = 0;
-            while (true) {
-                int pos = line.indexOf(searchFor, stPos);
-                if (pos >= 0) {
-                    boolean isFound = true;
-                    if (pos + searchFor.length() < line.length()) {
-                        // need to check next character. can be letter/digit/_/. which means we didn't find this key
-                        char nextChar = line.charAt(pos + searchFor.length());
-                        if (nextChar == '_' || nextChar == '.' || Character.isLetterOrDigit(nextChar)) {
-                            isFound = false;
+            if (isFound) {
+                // incremement value reference
+                AtomicInteger count = map.get(value);
+                count.addAndGet(1);
+            }
+        }
+        return isFound;
+    }
 
-                            // special case: <searchFor> can be found later on in the same line. check 1 more time..
-                            // eg: ? R.drawable.myfiles_file_mp4_thumb_lock : R.drawable.myfiles_file_mp4_thumb
-                            stPos = pos + 1;
-                            continue;
-                        }
-                    }
-                    if (isFound) {
-                        AtomicInteger count = map.get(value);
-                        count.addAndGet(1);
-                        // another variable could be used in the same Java line
-                        if (!isJava) {
-                            return true;
-                        }
-                    }
-                }
+    private static boolean searchLineForUseWithKey(String line, Map<String, AtomicInteger> map, String searchFor) {
+        int stPos = 0;
+        boolean isFound = false;
+        // while() loop is to handle multiple resources referenced on a single line
+        // eg: ? R.drawable.myfiles_file_mp4_thumb_lock : R.drawable.myfiles_file_mp4_thumb
+        while (true) {
+            // check if string exists in line
+            int pos = line.indexOf(searchFor, stPos);
+            if (pos < 0) {
+                // not found!
                 break;
             }
 
-            // special case; style element can have a parent=value
-            // eg: <style name="intro_text3" parent="intro_text_base">
-            if (searchFor2 != null && line.indexOf(searchFor2) >= 0) {
-                AtomicInteger count = map.get(value);
-                count.addAndGet(1);
-                return true;
+            isFound = true;
+
+            if (pos + searchFor.length() < line.length()) {
+                // need to check next character. can be letter/digit/_/. which means we didn't find this key
+                char nextChar = line.charAt(pos + searchFor.length());
+                if (nextChar == '_' || nextChar == '.' || Character.isLetterOrDigit(nextChar)) {
+                    // false positive.. keep searching rest of line
+                    isFound = false;
+
+                    // special case: <searchFor> can be found later on in the same line. check 1 more time..
+                    // eg: ? R.drawable.myfiles_file_mp4_thumb_lock : R.drawable.myfiles_file_mp4_thumb
+                    stPos = pos + 1;
+                    continue;
+                }
             }
 
-            // special case; style element can have a parent.value
-            // <style name="DialogButton">
-            // ...
-            // <style name="DialogButton.Left">
-            if (searchFor3 != null && line.indexOf(searchFor3) >= 0) {
-                AtomicInteger count = map.get(value);
-                count.addAndGet(1);
-                return true;
-            }
-
+            // only want to loop once.. while() is for case above
+            break;
         }
-        return false;
+
+        return isFound;
     }
 
     private static void replaceFileContents(File file) {
@@ -486,7 +648,12 @@ public class FindUnusedResources {
                 // the below entries (no need to look for all)
                 if (!isFound) {
                     isFound = checkLineEntry(line, mStringMap, createBeginTag(USE_STRING));
+                    // could be multi-line.. but, typically not
+                    if (isFound && !line.contains("</string>") && !line.contains("/>")) {
+                        deleteUntilTag = "</" + USE_STRING + ">";
+                    }
                 }
+
                 if (!isFound) {
                     isFound = checkLineEntry(line, mDimenMap, createBeginTag(USE_DIMEN));
                 }
@@ -494,7 +661,8 @@ public class FindUnusedResources {
                     isFound = checkLineEntry(line, mColorMap, createBeginTag(USE_COLOR));
                 }
 
-                // NOTE: the following entries aren't always 1-line :(
+                // NOTE: the following entries aren't always 1-line
+
                 if (!isFound) {
                     isFound = checkLineEntry(line, mArrayMap, createBeginTag(USE_ARR));
                     if (isFound) {
