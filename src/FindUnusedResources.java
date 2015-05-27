@@ -44,7 +44,7 @@ public class FindUnusedResources {
     private static String USE_LAYOUT = "layout";
     private static String USE_STYLES = "style";
 
-    private static String[] EXCLUDE_FILES = {"analytics.xml", "strings-generated.xml"};
+    private static String[] EXCLUDE_FILES = {"analytics.xml"};
 
     private static Map<String, Integer> mTotalRemovedMap = new HashMap<String, Integer>();
 
@@ -52,13 +52,7 @@ public class FindUnusedResources {
 
     public static void main(String[] args) {
         if (args.length == 0) {
-            System.out.println("Program to find and remove unused resources");
-            System.out.println("usage: FindUnusedResources <path>");
-            System.out.println("- where <path> is the path to an Android project (where AndroidManifest.xml exists)");
-            System.out.println("");
-            System.out.println("- optionally, add \"noprompt\" after <path> to remove unused w/out prompting");
-            System.out.println("eg: java FindUnusedResources ~/working/AndroidProject");
-            System.out.println("eg: java FindUnusedResources ~/working/AndroidProject noprompt");
+            printUsage();
             System.exit(0);
         }
 
@@ -73,6 +67,7 @@ public class FindUnusedResources {
         File mainFile = new File(root + "/AndroidManifest.xml");
         if (mainFile.exists() == false) {
             System.out.println("file: " + mainFile + " does not exist!\nBase directory should point to an Android project.");
+            printUsage();
             System.exit(0);
         }
 
@@ -151,6 +146,16 @@ public class FindUnusedResources {
                 System.out.println("-> " + value + " " + key + " resources");
             }
         }
+    }
+
+    private static void printUsage() {
+        System.out.println("Program to find and remove unused resources");
+        System.out.println("usage: FindUnusedResources <path>");
+        System.out.println("- where <path> is the path to an Android project (where AndroidManifest.xml exists)");
+        System.out.println("");
+        System.out.println("- optionally, add \"noprompt\" after <path> to remove unused w/out prompting");
+        System.out.println("eg: java FindUnusedResources ~/working/AndroidProject");
+        System.out.println("eg: java FindUnusedResources ~/working/AndroidProject noprompt");
     }
 
     private static int promptNext() {
@@ -558,7 +563,7 @@ public class FindUnusedResources {
             }
 
             if (!isFound && !isJava && map == mStylesMap) {
-                // special case: styles can reference a parent 2 ways in XML file:
+                // special case: styles can reference a parent 3 ways in XML file:
                 // 1) parent=
                 // <style name="SquareButtonStyle">
                 // <style name="GreenSquareButtonStyle" parent="@style/SquareButtonStyle">
@@ -569,6 +574,12 @@ public class FindUnusedResources {
                 // <style name="DialogButton">
                 // <style name="DialogButton.Left">
                 if (!isFound && line.indexOf("\"" + value + ".") >= 0) {
+                    isFound = true;
+                }
+                // 3) parent=
+                // <style name="SquareButtonStyle">
+                // <style name="GreenSquareButtonStyle" parent="SquareButtonStyle">
+                if (line.indexOf("parent=\"" + value + "\"") >= 0) {
                     isFound = true;
                 }
             }
