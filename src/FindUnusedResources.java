@@ -1,10 +1,4 @@
-import java.io.BufferedReader;
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
@@ -195,6 +189,9 @@ public class FindUnusedResources {
         // search through all JAVA files in /src directory
         searchDirForUse(new File(root + "/src"));
 
+        // search through all JAVA files in /java directory
+        searchDirForUse(new File(root + "/java"));
+
         // search through all XML files in /res directory
         searchDirForUse(resDir);
 
@@ -306,18 +303,28 @@ public class FindUnusedResources {
     private static void searchDirForUse(File dir) {
         // now, look through all .java and .xml files to find uses
         File[] fileArr = dir.listFiles();
+        if (fileArr == null) {
+            //System.out.println("searchDirForUse: no files: " + dir);
+            return;
+        }
+        boolean isAnyMatch = false;
         for (File file : fileArr) {
             if (file.isDirectory()) {
                 searchDirForUse(file);
             } else {
                 String filename = file.getName();
                 if (filename.endsWith(".xml") || filename.endsWith(".java")) {
-                    // System.out.println("seacrhing: " + file);
-                    searchFileForUse(file);
+                    // System.out.println("searching: " + file);
+                    boolean isMatch = searchFileForUse(file);
+                    if (isMatch) {
+                        isAnyMatch = true;
+                    }
 
+                    // print out some progress indicator
                     long timeMs = System.currentTimeMillis();
                     if (timeMs - mLastUpdateMs >= 400) {
-                        System.out.print(".");
+                        System.out.print(isAnyMatch ? "+" : ".");
+                        isAnyMatch = false;
                         mLastUpdateMs = timeMs;
                     }
                 }
@@ -478,7 +485,8 @@ public class FindUnusedResources {
         return false;
     }
 
-    private static void searchFileForUse(File file) {
+    private static boolean searchFileForUse(File file) {
+        boolean isAnyMatch = false;
         boolean isJava = file.getName().endsWith(".java");
         BufferedReader br = null;
         try {
@@ -500,7 +508,7 @@ public class FindUnusedResources {
                 // > Once one is found - we can save time by skiping searching for others on the same line
                 // Multiple references for the same time are checked:
                 // ex: int resId = (isSomething ? R.string.one : R.string.two);
-                boolean isMatch = false;
+                boolean isMatch;
                 isMatch = searchLineForUse(isJava, line, mStringMap, USE_STRING);
                 if (!isMatch) {
                     searchLineForUse(isJava, line, mDimenMap, USE_DIMEN);
@@ -520,6 +528,10 @@ public class FindUnusedResources {
                 if (!isMatch) {
                     isMatch = searchLineForUse(isJava, line, mLayoutMap, USE_LAYOUT);
                 }
+
+                if (isMatch) {
+                    isAnyMatch = true;
+                }
             }
         } catch (Exception e) {
             System.out.println("searchFileForUse: Error reading file: " + file + ", " + e.getMessage());
@@ -532,6 +544,7 @@ public class FindUnusedResources {
                 }
             }
         }
+        return isAnyMatch;
     }
 
     private static boolean searchLineForUse(boolean isJava, String line, Map<String, AtomicInteger> map, String type) {
