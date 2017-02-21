@@ -1,8 +1,5 @@
 import java.io.*;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.TreeMap;
+import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
@@ -27,6 +24,8 @@ public class FindUnusedResources {
     private static Map<String, AtomicInteger> mDrawableMap = new TreeMap<String, AtomicInteger>();
     private static Map<String, AtomicInteger> mLayoutMap = new TreeMap<String, AtomicInteger>();
     private static Map<String, AtomicInteger> mStylesMap = new TreeMap<String, AtomicInteger>();
+
+    private static List<String> deletedFileList = new ArrayList<>();
 
     // what resources we're looking for..
     private static String USE_STRING = "string";
@@ -65,16 +64,10 @@ public class FindUnusedResources {
             System.exit(0);
         }
 
-        File resDir = new File(root + "/res");
-
+        // find any directories named "res" and index all resources inside
+        File parentFile = new File(root).getParentFile();
         System.out.println("Indexing resources...");
-
-        // index contents of all .xml files in values*/ directory
-        indexValues(resDir, false);
-        // index all filenames in every /res/drawable*/ directory
-        indexDrawables(resDir, false);
-        // index all filenames in every /res/layout*/ directory
-        indexLayout(resDir, false);
+        indexAllResources(parentFile, false);
 
         System.out.println("got " + mStringMap.size() + " " + USE_STRING + " resources");
         System.out.println("got " + mDimenMap.size() + " " + USE_DIMEN + " resources");
@@ -138,6 +131,31 @@ public class FindUnusedResources {
                 String key = keyItor.next();
                 Integer value = mTotalRemovedMap.get(key);
                 System.out.println("-> " + value + " " + key + " resources");
+            }
+
+            System.out.println("-- FILES REMOVED --");
+            for (String filename : deletedFileList) {
+                System.out.println(filename);
+            }
+        }
+    }
+
+    private static void indexAllResources(File parentFile, boolean isDeleteMode) {
+        for (File file : parentFile.listFiles()) {
+            if (file.isDirectory()) {
+                if (file.getName().equals("res")) {
+                    if (!isDeleteMode) {
+                        System.out.println(" > " + file.getAbsolutePath());
+                    }
+                    // index contents of all .xml files in values*/ directory
+                    indexValues(file, isDeleteMode);
+                    // index all filenames in every /res/drawable*/ directory
+                    indexDrawables(file, isDeleteMode);
+                    // index all filenames in every /res/layout*/ directory
+                    indexLayout(file, isDeleteMode);
+                } else {
+                    indexAllResources(file, isDeleteMode);
+                }
             }
         }
     }
@@ -203,12 +221,10 @@ public class FindUnusedResources {
     }
 
     private static int deleteUnusedResources(String root, int i) {
-        File resDir = new File(root + "/res");
-
-        // delete files that aren't in use
-        indexValues(resDir, true);
-        indexDrawables(resDir, true);
-        indexLayout(resDir, true);
+        // find any directories named "res" and DELETE all unused resources inside
+        File parentFile = new File(root).getParentFile();
+        System.out.println("Deleting resources...");
+        indexAllResources(parentFile, true);
 
         // pring and clear deleted resources from maps for next time through
         int totalRemoved = 0;
@@ -257,6 +273,7 @@ public class FindUnusedResources {
                 if (isDeleteMode) {
                     AtomicInteger count = mDrawableMap.get(filename);
                     if (count != null && count.get() == 0) {
+                        deletedFileList.add(file.toString());
                         file.delete();
                     }
                 } else {
@@ -280,6 +297,7 @@ public class FindUnusedResources {
                 if (isDeleteMode) {
                     AtomicInteger count = mLayoutMap.get(filename);
                     if (count != null && count.get() == 0) {
+                        deletedFileList.add(file.toString());
                         file.delete();
                     }
                 } else {
@@ -341,6 +359,7 @@ public class FindUnusedResources {
         total += printResources(mStylesMap, USE_STYLES, showUnusedOnly, showSummaryOnly);
         total += printResources(mLayoutMap, USE_LAYOUT, showUnusedOnly, showSummaryOnly);
         total += printResources(mDrawableMap, USE_DRAWABLE, showUnusedOnly, showSummaryOnly);
+
         return total;
     }
 
