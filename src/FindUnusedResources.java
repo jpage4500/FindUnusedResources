@@ -17,13 +17,13 @@ public class FindUnusedResources {
     private static final int ACTION_DELETE = 2;
 
     // each map below contains ALL indexed resources for that particular type (string/color/etc) and a reference count
-    private static Map<String, AtomicInteger> mStringMap = new TreeMap<String, AtomicInteger>();
-    private static Map<String, AtomicInteger> mDimenMap = new TreeMap<String, AtomicInteger>();
-    private static Map<String, AtomicInteger> mColorMap = new TreeMap<String, AtomicInteger>();
-    private static Map<String, AtomicInteger> mArrayMap = new TreeMap<String, AtomicInteger>();
-    private static Map<String, AtomicInteger> mDrawableMap = new TreeMap<String, AtomicInteger>();
-    private static Map<String, AtomicInteger> mLayoutMap = new TreeMap<String, AtomicInteger>();
-    private static Map<String, AtomicInteger> mStylesMap = new TreeMap<String, AtomicInteger>();
+    private static Map<String, AtomicInteger> mStringMap = new TreeMap<>();
+    private static Map<String, AtomicInteger> mDimenMap = new TreeMap<>();
+    private static Map<String, AtomicInteger> mColorMap = new TreeMap<>();
+    private static Map<String, AtomicInteger> mStringArrayMap = new TreeMap<>();
+    private static Map<String, AtomicInteger> mDrawableMap = new TreeMap<>();
+    private static Map<String, AtomicInteger> mLayoutMap = new TreeMap<>();
+    private static Map<String, AtomicInteger> mStylesMap = new TreeMap<>();
 
     private static List<String> deletedFileList = new ArrayList<>();
 
@@ -31,8 +31,8 @@ public class FindUnusedResources {
     private static String USE_STRING = "string";
     private static String USE_DIMEN = "dimen";
     private static String USE_COLOR = "color";
-    private static String USE_ARR = "string-array";
-    private static String USE_ARR2 = "array";
+    private static String USE_STRING_ARRAY = "string-array";
+    private static String USE_STRING_ARRAY_REFERENCE = "array"; // string-array referenced as R.array.xxx
     private static String USE_DRAWABLE = "drawable";
     private static String USE_LAYOUT = "layout";
     private static String USE_STYLES = "style";
@@ -51,17 +51,26 @@ public class FindUnusedResources {
 
         String root = args[0];
 
-        boolean promptUser = true;
-        // check for "noprompt"
-        if (args.length >= ACTION_DELETE && args[1].equalsIgnoreCase("noprompt")) {
-            promptUser = false;
-        }
-
+        // make sure AndroidManifest.xml at root
         File mainFile = new File(root + "/AndroidManifest.xml");
         if (mainFile.exists() == false) {
             System.out.println("file: " + mainFile + " does not exist!\nBase directory should point to an Android project.");
             printUsage();
             System.exit(0);
+        }
+
+        // get additional arguments
+        List<String> additionalSearchPaths = new ArrayList<>();
+        boolean promptUser = true;
+        // check for "noprompt" as an argument
+        for (int i=1; args.length > i; i++) {
+            String arg = args[i];
+            if (arg.equalsIgnoreCase("noprompt")) {
+                promptUser = false;
+            }
+            else {
+                additionalSearchPaths.add(arg);
+            }
         }
 
         // find any directories named "res" and index all resources inside
@@ -72,7 +81,7 @@ public class FindUnusedResources {
         System.out.println("got " + mStringMap.size() + " " + USE_STRING + " resources");
         System.out.println("got " + mDimenMap.size() + " " + USE_DIMEN + " resources");
         System.out.println("got " + mColorMap.size() + " " + USE_COLOR + " resources");
-        System.out.println("got " + mArrayMap.size() + " " + USE_ARR + " resources");
+        System.out.println("got " + mStringArrayMap.size() + " " + USE_STRING_ARRAY + " resources");
         System.out.println("got " + mStylesMap.size() + " " + USE_STYLES + " resources");
         System.out.println("got " + mLayoutMap.size() + " " + USE_LAYOUT + " resources");
         System.out.println("got " + mDrawableMap.size() + " " + USE_DRAWABLE + " resources");
@@ -82,13 +91,26 @@ public class FindUnusedResources {
         // - the first pass will delete the layout and the second pass will delete the drawable
         int totalRemoved = 0;
         for (int i = 1; true; i++) {
-            // search for unused resources..
-            int unused = findUnusedResources(root, i);
+            System.out.print("\nPASS " + i);
+
+            // search root directory for resource usage
+            int unused = findUnusedResources(root);
             if (unused == 0) {
-                // nothing to do!
                 break;
             }
 
+            // search any additional paths for resources
+            for (String additionalPath : additionalSearchPaths) {
+                unused = findUnusedResources(additionalPath);
+                if (unused == 0) {
+                    break;
+                }
+            }
+            if (unused == 0) {
+                break;
+            }
+
+            // prepare to remove all remaining resources that weren't referenced
             int numRemoved = 0;
 
             // prompt next action..
@@ -111,6 +133,7 @@ public class FindUnusedResources {
                     printResources(false, false);
                 } else if (command == ACTION_EXIT) {
                     // STOP & exit!
+                    System.exit(1);
                     return;
                 }
             }
@@ -165,13 +188,13 @@ public class FindUnusedResources {
         System.out.println("usage: FindUnusedResources <path>");
         System.out.println("- where <path> is the path to an Android project (where AndroidManifest.xml exists)");
         System.out.println("");
+        System.out.println("- optionally, if project is a LIBRARY module you can pass additional paths to search for uses of it's resources");
         System.out.println("- optionally, add \"noprompt\" after <path> to remove unused w/out prompting");
-        System.out.println("eg: java FindUnusedResources ~/working/AndroidProject");
-        System.out.println("eg: java FindUnusedResources ~/working/AndroidProject noprompt");
+        System.out.println("eg: java FindUnusedResources ~/working/AndroidProject/src/main");
+        System.out.println("eg: java FindUnusedResources ~/working/AndroidProject/src/main noprompt");
     }
 
     private static int promptNext() {
-        //  prompt the user to enter their name
         System.out.println("");
         System.out.println("Select Option:");
         System.out.println(ACTION_PRINT_UNUSED + ") show UNUSED resources");
@@ -196,22 +219,16 @@ public class FindUnusedResources {
         return 0;
     }
 
-    private static int findUnusedResources(String root, int pass) {
-        File resDir = new File(root + "/res");
-
-        System.out.print("\nPASS " + pass);
-
+    /**
+     * @param root - directory to search through
+     * @return number of unused resources still remaining (targets to delete)
+     */
+    private static int findUnusedResources(String root) {
         // search through AndroidManifext.xml
         searchFileForUse(new File(root + "/AndroidManifest.xml"));
 
-        // search through all JAVA files in /src directory
-        searchDirForUse(new File(root + "/src"));
-
-        // search through all JAVA files in /java directory
-        searchDirForUse(new File(root + "/java"));
-
-        // search through all XML files in /res directory
-        searchDirForUse(resDir);
+        // search through all JAVA and XML files at <root>/../
+        searchDirForUse(new File(root + "/../"));
 
         // done searching
         System.out.println();
@@ -231,7 +248,7 @@ public class FindUnusedResources {
         totalRemoved += resetCounters(mStringMap, USE_STRING);
         totalRemoved += resetCounters(mDimenMap, USE_DIMEN);
         totalRemoved += resetCounters(mColorMap, USE_COLOR);
-        totalRemoved += resetCounters(mArrayMap, USE_ARR);
+        totalRemoved += resetCounters(mStringArrayMap, USE_STRING_ARRAY);
         totalRemoved += resetCounters(mStylesMap, USE_STYLES);
         totalRemoved += resetCounters(mLayoutMap, USE_LAYOUT);
         totalRemoved += resetCounters(mDrawableMap, USE_DRAWABLE);
@@ -355,7 +372,7 @@ public class FindUnusedResources {
         total += printResources(mStringMap, USE_STRING, showUnusedOnly, showSummaryOnly);
         total += printResources(mDimenMap, USE_DIMEN, showUnusedOnly, showSummaryOnly);
         total += printResources(mColorMap, USE_COLOR, showUnusedOnly, showSummaryOnly);
-        total += printResources(mArrayMap, USE_ARR, showUnusedOnly, showSummaryOnly);
+        total += printResources(mStringArrayMap, USE_STRING_ARRAY, showUnusedOnly, showSummaryOnly);
         total += printResources(mStylesMap, USE_STYLES, showUnusedOnly, showSummaryOnly);
         total += printResources(mLayoutMap, USE_LAYOUT, showUnusedOnly, showSummaryOnly);
         total += printResources(mDrawableMap, USE_DRAWABLE, showUnusedOnly, showSummaryOnly);
@@ -447,7 +464,7 @@ public class FindUnusedResources {
                     isFound = addLineEntry(line, mColorMap, createBeginTag(USE_COLOR));
                 }
                 if (!isFound) {
-                    isFound = addLineEntry(line, mArrayMap, createBeginTag(USE_ARR));
+                    isFound = addLineEntry(line, mStringArrayMap, createBeginTag(USE_STRING_ARRAY));
                 }
                 if (!isFound) {
                     isFound = addLineEntry(line, mStylesMap, createBeginTag(USE_STYLES));
@@ -466,8 +483,8 @@ public class FindUnusedResources {
         }
     }
 
-    private static String createBeginTag(String USE_STRING) {
-        return "<" + USE_STRING + " name=\"";
+    private static String createBeginTag(String tag) {
+        return "<" + tag + " name=\"";
     }
 
     private static boolean addLineEntry(String line, Map<String, AtomicInteger> map, String key) {
@@ -536,7 +553,7 @@ public class FindUnusedResources {
                     isMatch = searchLineForUse(isJava, line, mColorMap, USE_COLOR);
                 }
                 if (!isMatch) {
-                    isMatch = searchLineForUse(isJava, line, mArrayMap, USE_ARR2);
+                    isMatch = searchLineForUse(isJava, line, mStringArrayMap, USE_STRING_ARRAY_REFERENCE);
                 }
                 if (!isMatch) {
                     isMatch = searchLineForUse(isJava, line, mDrawableMap, USE_DRAWABLE);
@@ -707,9 +724,13 @@ public class FindUnusedResources {
                 // NOTE: the following entries aren't always 1-line
 
                 if (!isFound) {
-                    isFound = checkLineEntry(line, mArrayMap, createBeginTag(USE_ARR));
+                    isFound = checkLineEntry(line, mStringArrayMap, createBeginTag(USE_STRING_ARRAY));
                     if (isFound) {
-                        deleteUntilTag = "</" + USE_ARR + ">";
+                        // exception: empty string-array:
+                        // <string-array name="featured_images"/>
+                        if (!line.endsWith("/>")) {
+                            deleteUntilTag = "</" + USE_STRING_ARRAY + ">";
+                        }
                     }
                 }
 
