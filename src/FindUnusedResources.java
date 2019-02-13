@@ -39,7 +39,7 @@ public class FindUnusedResources {
 
     private static String[] EXCLUDE_FILES = {"analytics.xml"};
 
-    private static Map<String, Integer> mTotalRemovedMap = new HashMap<String, Integer>();
+    private static Map<String, Integer> mTotalRemovedMap = new HashMap<>();
 
     private static long mLastUpdateMs;
 
@@ -48,27 +48,26 @@ public class FindUnusedResources {
             printUsage();
             System.exit(0);
         }
-
+1
         String root = args[0];
 
         // make sure AndroidManifest.xml at root
         File mainFile = new File(root + "/AndroidManifest.xml");
-        if (mainFile.exists() == false) {
+        if (!mainFile.exists()) {
             System.out.println("file: " + mainFile + " does not exist!\nBase directory should point to an Android project.");
             printUsage();
             System.exit(0);
         }
-
+†
         // get additional arguments
         List<String> additionalSearchPaths = new ArrayList<>();
         boolean promptUser = true;
         // check for "noprompt" as an argument
-        for (int i=1; args.length > i; i++) {
+        for (int i = 1; args.length > i; i++) {
             String arg = args[i];
             if (arg.equalsIgnoreCase("noprompt")) {
                 promptUser = false;
-            }
-            else {
+            } else {
                 additionalSearchPaths.add(arg);
             }
         }
@@ -166,7 +165,11 @@ public class FindUnusedResources {
     private static void indexAllResources(File parentFile, boolean isDeleteMode) {
         for (File file : parentFile.listFiles()) {
             if (file.isDirectory()) {
-                if (file.getName().equals("res")) {
+                String fileName = file.getName();
+                if (fileName.equalsIgnoreCase("build")) {
+                    // ignore build folder
+                    continue;
+                } else if (fileName.equals("res")) {
                     if (!isDeleteMode) {
                         System.out.println(" > " + file.getAbsolutePath());
                     }
@@ -177,6 +180,7 @@ public class FindUnusedResources {
                     // index all filenames in every /res/layout*/ directory
                     indexLayout(file, isDeleteMode);
                 } else {
+                    // recurse into sub-directory
                     indexAllResources(file, isDeleteMode);
                 }
             }
@@ -318,7 +322,7 @@ public class FindUnusedResources {
                         file.delete();
                     }
                 } else {
-                    if (mLayoutMap.containsKey(filename) == false) {
+                    if (!mLayoutMap.containsKey(filename)) {
                         mLayoutMap.put(filename, new AtomicInteger());
                     }
                 }
@@ -348,7 +352,7 @@ public class FindUnusedResources {
                 searchDirForUse(file);
             } else {
                 String filename = file.getName();
-                if (filename.endsWith(".xml") || filename.endsWith(".java")) {
+                if (filename.endsWith(".xml") || filename.endsWith(".java") || filename.endsWith(".kt")) {
                     // System.out.println("searching: " + file);
                     boolean isMatch = searchFileForUse(file);
                     if (isMatch) {
@@ -523,7 +527,8 @@ public class FindUnusedResources {
 
     private static boolean searchFileForUse(File file) {
         boolean isAnyMatch = false;
-        boolean isJava = file.getName().endsWith(".java");
+        String fileName = file.getName();
+        boolean isJava = fileName.endsWith(".java") || fileName.endsWith(".kt");
         BufferedReader br = null;
         try {
             br = new BufferedReader(new FileReader(file));
