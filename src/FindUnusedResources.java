@@ -1,4 +1,5 @@
 import java.io.*;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -39,16 +40,19 @@ public class FindUnusedResources {
 
     private static String[] EXCLUDE_FILES = {"analytics.xml"};
 
+    private static final String TMP_FIND_UNUSED_RESOURCES = "/tmp/FindUnusedResources/";
+
     private static Map<String, Integer> mTotalRemovedMap = new HashMap<>();
 
     private static long mLastUpdateMs;
+    private static String mRootPath;
 
     public static void main(String[] args) {
         if (args.length == 0) {
             printUsage();
             System.exit(0);
         }
-1
+
         String root = args[0];
 
         // make sure AndroidManifest.xml at root
@@ -58,7 +62,7 @@ public class FindUnusedResources {
             printUsage();
             System.exit(0);
         }
-†
+
         // get additional arguments
         List<String> additionalSearchPaths = new ArrayList<>();
         boolean promptUser = true;
@@ -74,6 +78,7 @@ public class FindUnusedResources {
 
         // find any directories named "res" and index all resources inside
         File parentFile = new File(root).getParentFile();
+        mRootPath = parentFile.getAbsolutePath();
         System.out.println("Indexing resources...");
         indexAllResources(parentFile, false);
 
@@ -242,6 +247,20 @@ public class FindUnusedResources {
     }
 
     private static int deleteUnusedResources(String root, int i) {
+        // first time through remove backup folder
+        if (i == 1) {
+            // TODO: use this to support windows better
+            //String tmpFolder = System.getProperty("java.io.tmpdir");
+            File backupFolder = new File(TMP_FIND_UNUSED_RESOURCES);
+            if (backupFolder.exists()) {
+                // delete tmp folder and all of it's contents
+                System.out.println("Deleting backup folder: " + TMP_FIND_UNUSED_RESOURCES);
+                final File[] files = backupFolder.listFiles();
+                for (File f : files) f.delete();
+                backupFolder.delete();
+            }
+        }
+
         // find any directories named "res" and DELETE all unused resources inside
         File parentFile = new File(root).getParentFile();
         System.out.println("Deleting resources...");
@@ -294,8 +313,7 @@ public class FindUnusedResources {
                 if (isDeleteMode) {
                     AtomicInteger count = mDrawableMap.get(filename);
                     if (count != null && count.get() == 0) {
-                        deletedFileList.add(file.toString());
-                        file.delete();
+                        backupAndDeleteFile(file);
                     }
                 } else {
                     if (mDrawableMap.containsKey(filename) == false) {
@@ -318,8 +336,7 @@ public class FindUnusedResources {
                 if (isDeleteMode) {
                     AtomicInteger count = mLayoutMap.get(filename);
                     if (count != null && count.get() == 0) {
-                        deletedFileList.add(file.toString());
-                        file.delete();
+                        backupAndDeleteFile(file);
                     }
                 } else {
                     if (!mLayoutMap.containsKey(filename)) {
@@ -328,6 +345,37 @@ public class FindUnusedResources {
                 }
             }
         }
+    }
+
+    private static void backupAndDeleteFile(File file) {
+        // backup file to /tmp folder using the same folder structure to avoid name conflicts
+        String fileNameFull = file.getAbsolutePath();
+        String relativeName = fileNameFull.replace(mRootPath, "");
+        if (relativeName.startsWith("/") && relativeName.length() > 1) {
+            relativeName = relativeName.substring(1);
+        }
+        File backupFile = new File(TMP_FIND_UNUSED_RESOURCES + relativeName);
+        File backupFolder = backupFile.getParentFile();
+        if (!backupFolder.exists()) {
+            boolean isOk = backupFolder.mkdirs();
+            if (!isOk) {
+                System.out.print("ERROR creating backup folder: " + backupFolder.getAbsolutePath() + " to backup: " + fileNameFull);
+                return;
+            }
+        }
+        try {
+            Files.copy(file.toPath(), backupFile.toPath());
+        } catch (IOException e) {
+            System.out.print("ERROR backing up: " + fileNameFull + " to: " + backupFile + ", Exception: " + e.getMessage());
+            return;
+        }
+
+        boolean isOk = file.delete();
+        if (!isOk) {
+            System.out.print("ERROR deleting: " + fileNameFull);
+            return;
+        }
+        deletedFileList.add(file.toString());
     }
 
     private static boolean isExcludedFile(String filename) {
