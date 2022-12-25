@@ -594,7 +594,7 @@ public class FindUnusedResources {
 
                 // search line for a reference to one of the indexed resources
                 // NOTE: I'm expecting at most a line can only contain a reference to a single resource type (string/color/etc)
-                // > Once one is found - we can save time by skiping searching for others on the same line
+                // > Once one is found - we can save time by skipping searching for others on the same line
                 // Multiple references for the same time are checked:
                 // ex: int resId = (isSomething ? R.string.one : R.string.two);
                 boolean isMatch;
@@ -638,7 +638,8 @@ public class FindUnusedResources {
 
     private static boolean searchLineForUse(boolean isJava, String line, Map<String, AtomicInteger> map, String type) {
         String searchFor; // primary use case (ie: R.string.value)
-        String searchFor2 = null; // secondary use case (ie: R.id.value)
+        String searchFor2; // secondary use case (ie: R.id.value)
+        String searchFor3 = null;
 
         boolean isFound = false;
 
@@ -653,6 +654,10 @@ public class FindUnusedResources {
                 }
                 searchFor = "R." + type + "." + convertedValue; // R.string.value
                 searchFor2 = "R.id." + convertedValue; // R.id.value
+                if (type.equals(USE_LAYOUT)) {
+                    // view binding: fragment_disabled.xml = FragmentDisabledBinding
+                    searchFor3 = toViewBindingName(value);
+                }
             } else {
                 // XML file
                 searchFor = "@" + type + "/" + value; // @string/value
@@ -662,6 +667,9 @@ public class FindUnusedResources {
             isFound = searchLineForUseWithKey(line, map, searchFor);
             if (!isFound && searchFor2 != null) {
                 isFound = searchLineForUseWithKey(line, map, searchFor2);
+            }
+            if (!isFound && searchFor3 != null) {
+                isFound = searchLineForUseWithKey(line, map, searchFor3);
             }
 
             if (!isFound && !isJava && map == mStylesMap) {
@@ -693,6 +701,37 @@ public class FindUnusedResources {
             }
         }
         return isFound;
+    }
+
+    /**
+     * view binding: fragment_disabled = FragmentDisabledBinding
+     */
+    protected static String toViewBindingName(String layout) {
+        if (layout == null) return null;
+
+        StringBuilder sb = new StringBuilder();
+        boolean isNextCharUppercase = false;
+        for (int i = 0; i < layout.length(); i++) {
+            char letter = layout.charAt(i);
+            boolean isUpperCase = false;
+            if (i == 0) {
+                // first letter always UPPERCASE
+                isUpperCase = true;
+            } else if (isNextCharUppercase) {
+                isUpperCase = true;
+                isNextCharUppercase = false;
+            } else if (letter == '_') {
+                isNextCharUppercase = true;
+            }
+
+            if (isUpperCase) {
+                sb.append(Character.toUpperCase(letter));
+            } else if (!isNextCharUppercase) {
+                sb.append(letter);
+            }
+        }
+
+        return sb.toString() + "Binding";
     }
 
     private static boolean searchLineForUseWithKey(String line, Map<String, AtomicInteger> map, String searchFor) {
