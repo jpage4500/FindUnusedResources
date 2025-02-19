@@ -3,3 +3,8 @@
 build/
 bin/
 .DS_Store
+
+target/
+classes/
+
+*.class
