@@ -2,6 +2,7 @@ package com.jpage;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -366,7 +367,7 @@ public class FindUnusedResources {
             }
         }
         try {
-            Files.copy(file.toPath(), backupFile.toPath());
+            Files.copy(file.toPath(), backupFile.toPath(), StandardCopyOption.REPLACE_EXISTING);
         } catch (IOException e) {
             System.out.print("ERROR backing up: " + fileNameFull + " to: " + backupFile + ", Exception: " + e.getMessage());
             return;
@@ -752,7 +753,7 @@ public class FindUnusedResources {
             isFound = true;
 
             if (pos + searchFor.length() < line.length()) {
-                // need to check next character. can be letter/digit/_/. which means we didn't find this key
+                // need to check the next character. can be letter/digit/_/. which means we didn't find this key
                 char nextChar = line.charAt(pos + searchFor.length());
                 if (nextChar == '_' || nextChar == '.' || Character.isLetterOrDigit(nextChar)) {
                     // false positive.. keep searching rest of line
